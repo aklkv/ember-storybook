@@ -10,7 +10,7 @@
     "docs:preview": "vitepress preview docs"
   },
   "devDependencies": {
-    "@playwright/mcp": "^0.0.79",
+    "@playwright/mcp": "^0.0.82",
     "markdown-it-container": "^4.0.0",
     "playwright": "^1.62.1",
     "release-plan": "^0.18.0",
