@@ -330,6 +330,38 @@ function readSubcomponentNames(node: unknown): Record<string, string> {
 }
 
 /**
+ * The local function a `render` refers to: `render: renderX` → `renderX`,
+ * `render: makeRender(…)` → `makeRender`.
+ */
+function referencedFunctionName(node: unknown): string | undefined {
+  let current = node;
+
+  // Unwrap calls, curried ones included: `makeRender(a)(b)` → `makeRender`
+  while (
+    typeof current === 'object' &&
+    current !== null &&
+    'type' in current &&
+    current.type === 'CallExpression' &&
+    'callee' in current
+  ) {
+    current = current.callee;
+  }
+
+  if (
+    typeof current === 'object' &&
+    current !== null &&
+    'type' in current &&
+    current.type === 'Identifier' &&
+    'name' in current &&
+    typeof current.name === 'string'
+  ) {
+    return current.name;
+  }
+
+  return undefined;
+}
+
+/**
  * Parse a story file and return metadata about the component it references,
  * including template sources for each named story export.
  */
@@ -340,10 +372,10 @@ export function parseStoryFile(storyPath: string): StoryFile | undefined {
   let meta: StaticMeta | undefined = {};
   let stories: (StaticStory & { inlineTemplate?: string })[] = [];
   let subcomponentNames: Record<string, string> = {};
-  // The meta's variable (`const meta = preview.meta({ … })`), whether the meta
-  // has a `render`, and the annotations each story export sets itself.
+  // The meta's variable (`const meta = preview.meta({ … })`), its `render`, and
+  // the annotations each story export sets itself.
   let metaVariableName: string | undefined;
-  let metaHasRender = false;
+  let metaRender: unknown;
   let storyAnnotations: Record<string, Record<string, unknown> | undefined> = {};
 
   try {
@@ -357,7 +389,7 @@ export function parseStoryFile(storyPath: string): StoryFile | undefined {
     stories = parsed.stories;
     subcomponentNames = readSubcomponentNames(csf._metaAnnotations.subcomponents);
     metaVariableName = csf._metaVariableName;
-    metaHasRender = Object.hasOwn(csf._metaAnnotations, 'render');
+    metaRender = csf._metaAnnotations.render;
     storyAnnotations = csf._storyAnnotations;
   } catch {
     // CSF parsing failed — return partial result
@@ -375,6 +407,24 @@ export function parseStoryFile(storyPath: string): StoryFile | undefined {
   let metaDepth = 0;
   let metaRenderDepth = 0;
   let metaTemplate: string | undefined;
+
+  // Top-level declarations a `render` can refer to (`function renderX(args) { … }`,
+  // `const makeRender = (…) => (args) => …`, a non-exported story), with the
+  // first template each contains.
+  const helpers: { name: string; start: number; end: number }[] = [];
+  const helperTemplates = new Map<string, string>();
+
+  for (const statement of program.body) {
+    if (statement.type === 'FunctionDeclaration' && statement.id) {
+      helpers.push({ name: statement.id.name, start: statement.start, end: statement.end });
+    } else if (statement.type === 'VariableDeclaration') {
+      for (const declarator of statement.declarations) {
+        if (declarator.id.type === 'Identifier') {
+          helpers.push({ name: declarator.id.name, start: declarator.start, end: declarator.end });
+        }
+      }
+    }
+  }
 
   const isMetaDeclarator = (node: VariableDeclarator) =>
     metaVariableName !== undefined &&
@@ -478,20 +528,39 @@ export function parseStoryFile(storyPath: string): StoryFile | undefined {
 
       const currentStory = exportStack.at(-1);
 
-      if (currentStory && !currentStory.inlineTemplate) currentStory.inlineTemplate = raw;
+      if (currentStory) {
+        currentStory.inlineTemplate ??= raw;
+
+        return;
+      }
+
+      const helper = helpers.find((h) => node.start >= h.start && node.end <= h.end);
+
+      if (helper && !helperTemplates.has(helper.name)) helperTemplates.set(helper.name, raw);
     }
   });
 
   visitor.visit(program);
 
-  // A story without its own `render` renders the one it inherits: from the
-  // story it `extend()`s, or else from the meta. Show that template too.
+  // A `render` that refers to a helper (`render: renderX`, `render: makeRender(…)`)
+  const helperTemplate = (render: unknown) => {
+    const name = referencedFunctionName(render);
+
+    return name === undefined ? undefined : helperTemplates.get(name);
+  };
+
+  // A story renders its own `render`, or else the one it inherits: from the
+  // story it `extend()`s, or else from the meta. Show that template.
   const inheritedTemplate = (name: string, seen: Set<string>): string | undefined => {
     const story = storiesByExport.get(name);
 
     if (story?.inlineTemplate) return story.inlineTemplate;
-    // Its own render has no template (e.g. it returns a component): nothing to show.
-    if (storyAnnotations[name]?.render) return undefined;
+    // A story declared without an export, extended by an exported one
+    if (!story && helperTemplates.has(name)) return helperTemplates.get(name);
+
+    const render = storyAnnotations[name]?.render;
+
+    if (render) return helperTemplate(render);
 
     const base = extendedStories.get(name);
 
@@ -501,7 +570,7 @@ export function parseStoryFile(storyPath: string): StoryFile | undefined {
       return inheritedTemplate(base, seen);
     }
 
-    return metaHasRender ? metaTemplate : undefined;
+    return metaRender ? (metaTemplate ?? helperTemplate(metaRender)) : undefined;
   };
 
   for (const [name, story] of storiesByExport) {
