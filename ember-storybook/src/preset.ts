@@ -112,18 +112,15 @@ export const experimental_indexers: StorybookConfig['experimental_indexers'] = (
 };
 
 // Storybook calls this with the index entries tagged `manifest` when the
-// `componentsManifest` feature is on (e.g. by @storybook/addon-mcp).
+// `componentsManifest` feature is on (e.g. by @storybook/addon-mcp). It also
+// probes with no entries to learn whether the framework provides a manifest.
 export const experimental_manifests = async (
   existing: Manifests | undefined,
   options: { manifestEntries?: IndexEntry[] }
-): Promise<Manifests | undefined> => {
-  if (!options.manifestEntries?.length) return existing;
-
-  return {
-    ...existing,
-    components: await buildComponentsManifest(options.manifestEntries)
-  };
-};
+): Promise<Manifests> => ({
+  ...existing,
+  components: await buildComponentsManifest(options.manifestEntries ?? [])
+});
 
 export const core: PresetProperty<'core'> = async (config, options) => {
   const framework = await options.presets.apply('framework');

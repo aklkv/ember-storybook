@@ -15,10 +15,15 @@ function isBlockParam(param: BlockParam | Record<string, BlockParam>): param is 
   return Object.hasOwn(param, 'name') && Object.hasOwn(param, 'type');
 }
 
+// A yielded component's type is Glint's expanded `Invokable<...>`; name the component instead.
+function paramType(param: BlockParam): string {
+  return param.componentRef ? 'component' : `\`${cell(param.type)}\``;
+}
+
 function describeParam(param: BlockParam): string {
   const description = param.description ? `: ${cell(param.description)}` : '';
 
-  return `\`${param.name}\` (\`${cell(param.type)}\`)${description}`;
+  return `\`${param.name}\` (${paramType(param)})${description}`;
 }
 
 function describeBlock(name: string, block: BlockInfo): string[] {
@@ -32,7 +37,7 @@ function describeBlock(name: string, block: BlockInfo): string[] {
       lines.push('  - yields a hash:');
 
       for (const [key, entry] of Object.entries(param)) {
-        lines.push(`    - \`${key}\`: \`${cell(entry.type)}\``);
+        lines.push(`    - \`${key}\`: ${paramType(entry)}`);
       }
     }
   }

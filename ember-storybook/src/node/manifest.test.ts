@@ -20,7 +20,14 @@ const signature: ComponentSignature = {
   },
   blocks: {
     default: {
-      params: [{ name: 'Item', type: "WithBoundArgs<typeof Item, 'list'>" }]
+      params: [
+        {
+          name: 'Item',
+          type: 'Invokable<(named: PrebindArgs<{ list: List }, "list">) => ComponentReturn<{}>>',
+          componentRef: { filePath: './item.gts', exportName: 'Item' }
+        },
+        { name: 'index', type: 'number', description: 'Position in the list' }
+      ]
     },
     header: { params: [], description: 'Shown above the list' }
   },
@@ -36,13 +43,14 @@ describe('apiDescription', () => {
         '',
         '| Name | Type | Default | Description |',
         '| --- | --- | --- | --- |',
-        String.raw`| ` + "`@kind` (required) | `'primary' \\| 'secondary'` |  | The button style |",
+        "| `@kind` (required) | `'primary' \\| 'secondary'` |  | The button style |",
         '| `@disabled` | `boolean` | `false` |  |',
         '',
         '## Blocks',
         '',
         '- default block',
-        "  - yields `Item` (`WithBoundArgs<typeof Item, 'list'>`)",
+        '  - yields `Item` (component)',
+        '  - yields `index` (`number`): Position in the list',
         '- `<:header>`: Shown above the list',
         '',
         '## Element',
