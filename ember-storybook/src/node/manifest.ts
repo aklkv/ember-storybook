@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { runTypeDoc } from './docgen/docgen';
+import { resolveTsconfigBase, runTypeDoc } from './docgen/docgen';
 import { parseStoryFile, type StoryFile } from './parser';
 
 import type { BlockInfo, BlockParam, ComponentSignature } from 'ember-docgen';
@@ -140,19 +140,26 @@ export async function buildComponentsManifest(entries: IndexEntry[]): Promise<Co
       .values()
       .flatMap((parsed) => (parsed?.component.file ? [path.resolve(parsed.component.file)] : []))
   );
-  const signatures = await runTypeDoc(componentFiles.values().toArray());
+  // runTypeDoc keys files relative to the tsconfig's directory.
+  const base = resolveTsconfigBase() ?? process.cwd();
+  const extracted = await runTypeDoc(componentFiles.values().toArray());
+  const signatures = new Map(
+    Object.entries(extracted).map(([file, sigs]) => [path.resolve(base, file), sigs])
+  );
   const components: Record<string, ComponentManifest> = {};
 
   for (const [file, group] of byStoryFile) {
     const parsed = storyFiles.get(file);
     const [first] = group as [IndexEntry, ...IndexEntry[]];
+
+    // Docs-only pages (a standalone MDX file) document no component.
+    if (group.every((entry) => entry.type !== 'story')) continue;
+
     const id = componentId(first.id);
     const componentFile = parsed?.component.file ? path.resolve(parsed.component.file) : undefined;
     const signatureName = parsed?.component.signatureName;
     const signature =
-      componentFile && signatureName && Object.hasOwn(signatures, componentFile)
-        ? signatures[componentFile][signatureName]
-        : undefined;
+      componentFile && signatureName ? signatures.get(componentFile)?.[signatureName] : undefined;
     const name = parsed?.component.name ?? first.title.split('/').at(-1) ?? id;
 
     components[id] = {
